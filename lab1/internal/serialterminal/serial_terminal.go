@@ -1,0 +1,171 @@
+package serialterminal
+
+import (
+	"fmt"
+	"io"
+	"log"
+	"time"
+
+	"github.com/tarm/serial"
+)
+
+type SerialTerminal struct {
+	port        io.ReadWriteCloser
+	portName    string
+	dataBits    int
+	stopReading chan bool
+	messageChan chan string
+	OnMessage   func(string)
+	OnStatus    func(string)
+}
+
+func New(name string) *SerialTerminal {
+	return &SerialTerminal{
+		portName:    name,
+		dataBits:    8,
+		stopReading: make(chan bool, 1),
+		messageChan: make(chan string, 100),
+		OnMessage:   func(string) {},
+		OnStatus:    func(string) {},
+	}
+}
+
+func (st *SerialTerminal) SetPortName(name string) {
+	st.portName = name
+}
+
+func (st *SerialTerminal) SetDataBits(dataBits int) {
+	st.dataBits = dataBits
+}
+
+func (st *SerialTerminal) GetDataBits() int {
+	return st.dataBits
+}
+
+func (st *SerialTerminal) GetPortName() string {
+	return st.portName
+}
+
+func (st *SerialTerminal) IsConnected() bool {
+	return st.port != nil
+}
+
+func (st *SerialTerminal) Connect() error {
+	c := &serial.Config{
+		Name:        st.portName,
+		Baud:        9600,
+		ReadTimeout: time.Second * 1,
+		Size:        byte(st.dataBits),
+		Parity:      serial.ParityNone,
+		StopBits:    serial.Stop1,
+	}
+
+	s, err := serial.OpenPort(c)
+	if err != nil {
+		log.Printf("Error opening port %s: %v", st.portName, err)
+		return err
+	}
+
+	st.port = s
+	if st.OnStatus != nil {
+		st.OnStatus(fmt.Sprintf("Connected to %s", st.portName))
+	}
+	log.Printf("Successfully connected to port %s", st.portName)
+
+	go st.readPort()
+	go st.messageHandler()
+
+	return nil
+}
+
+func (st *SerialTerminal) Disconnect() error {
+	if st.port != nil {
+		select {
+		case st.stopReading <- true:
+		default:
+		}
+
+		err := st.port.Close()
+		if err != nil {
+			log.Printf("Error closing port %s: %v", st.portName, err)
+			return err
+		}
+
+		st.port = nil
+		if st.OnStatus != nil {
+			st.OnStatus("Disconnected")
+		}
+		log.Printf("Disconnected from port %s", st.portName)
+	}
+	return nil
+}
+
+func (st *SerialTerminal) SendMessage(msg string) error {
+	if st.port == nil {
+		return fmt.Errorf("port not connected")
+	}
+
+	if msg == "" {
+		return nil
+	}
+
+	message := msg + "\r\n"
+	_, err := st.port.Write([]byte(message))
+	if err != nil {
+		log.Printf("Error writing to port %s: %v", st.portName, err)
+		return err
+	}
+
+	log.Printf("Sent to %s: %s", st.portName, msg)
+	st.messageChan <- "Sent: " + msg
+
+	return nil
+}
+
+func (st *SerialTerminal) messageHandler() {
+	for {
+		select {
+		case msg := <-st.messageChan:
+			if st.OnMessage != nil {
+				st.OnMessage(msg)
+			}
+		case <-st.stopReading:
+			return
+		}
+	}
+}
+
+func (st *SerialTerminal) readPort() {
+	buf := make([]byte, 256)
+
+	for {
+		select {
+		case <-st.stopReading:
+			log.Printf("Reading stopped by request for port %s", st.portName)
+			return
+		default:
+			if st.port == nil {
+				return
+			}
+
+			n, err := st.port.Read(buf)
+			if err != nil {
+				if err == io.EOF {
+					time.Sleep(time.Millisecond * 100)
+					continue
+				}
+				log.Printf("Error reading from port %s: %v", st.portName, err)
+				time.Sleep(time.Second * 1)
+				continue
+			}
+
+			if n > 0 {
+				receivedMessage := string(buf[:n])
+				log.Printf("Received from %s: %q (bytes: %d)", st.portName, receivedMessage, n)
+				st.messageChan <- "Received: " + receivedMessage
+			}
+
+			time.Sleep(time.Millisecond * 10)
+		}
+	}
+}
