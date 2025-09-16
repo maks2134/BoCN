@@ -15,7 +15,7 @@ type TerminalUI struct {
 	terminal       *serialterminal.SerialTerminal
 	inputEntry     *widget.Entry
 	outputArea     *widget.Entry
-	connectButton  *widget.Button
+	openButton     *widget.Button
 	statusLabel    *widget.Label
 	portEntry      *widget.Entry
 	byteSizeSelect *widget.Select
@@ -28,7 +28,7 @@ func New(term *serialterminal.SerialTerminal, w fyne.Window) *TerminalUI {
 		window:         w,
 		inputEntry:     widget.NewEntry(),
 		outputArea:     widget.NewMultiLineEntry(),
-		statusLabel:    widget.NewLabel("Disconnected"),
+		statusLabel:    widget.NewLabel("Port closed"),
 		portEntry:      widget.NewEntry(),
 		byteSizeSelect: widget.NewSelect([]string{"5", "6", "7", "8"}, nil),
 	}
@@ -54,7 +54,7 @@ func New(term *serialterminal.SerialTerminal, w fyne.Window) *TerminalUI {
 		}
 	}
 
-	ui.connectButton = widget.NewButton("Connect", ui.toggleConnect)
+	ui.openButton = widget.NewButton("Open Port", ui.togglePort)
 
 	return ui
 }
@@ -71,15 +71,15 @@ func (ui *TerminalUI) handleMessage(msg string) {
 func (ui *TerminalUI) handleStatus(status string) {
 	ui.statusLabel.SetText(status)
 	if ui.terminal.IsConnected() {
-		ui.connectButton.SetText("Disconnect")
+		ui.openButton.SetText("Close Port")
 		ui.inputEntry.Enable()
 	} else {
-		ui.connectButton.SetText("Connect")
+		ui.openButton.SetText("Open Port")
 		ui.inputEntry.Disable()
 	}
 }
 
-func (ui *TerminalUI) toggleConnect() {
+func (ui *TerminalUI) togglePort() {
 	if !ui.terminal.IsConnected() {
 		err := ui.terminal.Connect()
 		if err != nil {
@@ -93,7 +93,7 @@ func (ui *TerminalUI) toggleConnect() {
 	}
 }
 
-func (ui *TerminalUI) sendMessage() {
+func (ui *TerminalUI) sendData() {
 	msg := ui.inputEntry.Text
 	if msg == "" {
 		return
@@ -108,19 +108,19 @@ func (ui *TerminalUI) sendMessage() {
 }
 
 func (ui *TerminalUI) Layout() fyne.CanvasObject {
-	sendButton := widget.NewButton("Send", func() {
-		ui.sendMessage()
+	sendButton := widget.NewButton("Send Data", func() {
+		ui.sendData()
 	})
 
 	settingsGrid := container.NewGridWithColumns(2,
-		widget.NewLabel("Port Name:"),
+		widget.NewLabel("Port:"),
 		ui.portEntry,
-		widget.NewLabel("Byte Size:"),
+		widget.NewLabel("Data Bits:"),
 		ui.byteSizeSelect,
 	)
 
 	settingsBox := container.NewBorder(
-		widget.NewLabel("Connection Settings"),
+		widget.NewLabel("Port Configuration"),
 		nil, nil, nil,
 		settingsGrid,
 	)
@@ -132,13 +132,13 @@ func (ui *TerminalUI) Layout() fyne.CanvasObject {
 		container.NewHBox(
 			widget.NewLabel("Status:"),
 			ui.statusLabel,
-			ui.connectButton,
+			ui.openButton,
 		),
 		settingsBox,
-		widget.NewLabel("Input:"),
+		widget.NewLabel("Data to send:"),
 		ui.inputEntry,
 		sendButton,
-		widget.NewLabel("Output:"),
+		widget.NewLabel("Communication log:"),
 		outputScroll,
 	)
 }

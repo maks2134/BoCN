@@ -68,9 +68,9 @@ func (st *SerialTerminal) Connect() error {
 
 	st.port = s
 	if st.OnStatus != nil {
-		st.OnStatus(fmt.Sprintf("Connected to %s", st.portName))
+		st.OnStatus(fmt.Sprintf("Port %s open", st.portName))
 	}
-	log.Printf("Successfully connected to port %s", st.portName)
+	log.Printf("Port %s opened successfully", st.portName)
 
 	go st.readPort()
 	go st.messageHandler()
@@ -93,16 +93,16 @@ func (st *SerialTerminal) Disconnect() error {
 
 		st.port = nil
 		if st.OnStatus != nil {
-			st.OnStatus("Disconnected")
+			st.OnStatus("Port closed")
 		}
-		log.Printf("Disconnected from port %s", st.portName)
+		log.Printf("Port %s closed", st.portName)
 	}
 	return nil
 }
 
 func (st *SerialTerminal) SendMessage(msg string) error {
 	if st.port == nil {
-		return fmt.Errorf("port not connected")
+		return fmt.Errorf("port not open")
 	}
 
 	if msg == "" {
@@ -116,8 +116,8 @@ func (st *SerialTerminal) SendMessage(msg string) error {
 		return err
 	}
 
-	log.Printf("Sent to %s: %s", st.portName, msg)
-	st.messageChan <- "Sent: " + msg
+	log.Printf("Data sent to %s: %s", st.portName, msg)
+	st.messageChan <- "TX: " + msg
 
 	return nil
 }
@@ -141,7 +141,7 @@ func (st *SerialTerminal) readPort() {
 	for {
 		select {
 		case <-st.stopReading:
-			log.Printf("Reading stopped by request for port %s", st.portName)
+			log.Printf("Reading stopped for port %s", st.portName)
 			return
 		default:
 			if st.port == nil {
@@ -161,8 +161,8 @@ func (st *SerialTerminal) readPort() {
 
 			if n > 0 {
 				receivedMessage := string(buf[:n])
-				log.Printf("Received from %s: %q (bytes: %d)", st.portName, receivedMessage, n)
-				st.messageChan <- "Received: " + receivedMessage
+				log.Printf("Data received from %s: %q (%d bytes)", st.portName, receivedMessage, n)
+				st.messageChan <- "RX: " + receivedMessage
 			}
 
 			time.Sleep(time.Millisecond * 10)
