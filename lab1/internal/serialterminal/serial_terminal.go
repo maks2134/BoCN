@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"os"
 	"time"
 
 	"github.com/tarm/serial"
@@ -35,7 +36,15 @@ func (st *SerialTerminal) SetPortName(name string) {
 }
 
 func (st *SerialTerminal) SetDataBits(dataBits int) {
+	oldDataBits := st.dataBits
 	st.dataBits = dataBits
+
+	if st.port != nil && oldDataBits != dataBits {
+		log.Printf("Data bits changed from %d to %d, reconnecting...", oldDataBits, dataBits)
+		st.Disconnect()
+		time.Sleep(time.Millisecond * 100)
+		st.Connect()
+	}
 }
 
 func (st *SerialTerminal) GetDataBits() int {
@@ -62,8 +71,7 @@ func (st *SerialTerminal) Connect() error {
 
 	s, err := serial.OpenPort(c)
 	if err != nil {
-		log.Printf("Error opening port %s: %v", st.portName, err)
-		return err
+		return st.formatError("open", err)
 	}
 
 	st.port = s
@@ -87,8 +95,7 @@ func (st *SerialTerminal) Disconnect() error {
 
 		err := st.port.Close()
 		if err != nil {
-			log.Printf("Error closing port %s: %v", st.portName, err)
-			return err
+			return st.formatError("close", err)
 		}
 
 		st.port = nil
@@ -100,24 +107,49 @@ func (st *SerialTerminal) Disconnect() error {
 	return nil
 }
 
+func (st *SerialTerminal) formatError(operation string, err error) error {
+	if os.IsNotExist(err) {
+		return fmt.Errorf("serial port %s does not exist", st.portName)
+	}
+	if os.IsPermission(err) {
+		return fmt.Errorf("permission denied for port %s", st.portName)
+	}
+	return fmt.Errorf("failed to %s port %s: %v", operation, st.portName, err)
+}
+
+func (st *SerialTerminal) applyDataBitMask(msg string) string {
+	if st.dataBits >= 8 {
+		return msg
+	}
+
+	mask := byte((1 << st.dataBits) - 1)
+	result := make([]byte, len(msg))
+	for i, char := range []byte(msg) {
+		result[i] = char & mask
+	}
+
+	return string(result)
+}
+
 func (st *SerialTerminal) SendMessage(msg string) error {
 	if st.port == nil {
-		return fmt.Errorf("port not open")
+		return fmt.Errorf("port is not open")
 	}
 
 	if msg == "" {
 		return nil
 	}
 
-	message := msg + "\r\n"
+	maskedMsg := st.applyDataBitMask(msg)
+	message := maskedMsg + "\r\n"
+
 	_, err := st.port.Write([]byte(message))
 	if err != nil {
-		log.Printf("Error writing to port %s: %v", st.portName, err)
-		return err
+		return st.formatError("write to", err)
 	}
 
-	log.Printf("Data sent to %s: %s", st.portName, msg)
-	st.messageChan <- "TX: " + msg
+	log.Printf("Data sent to %s: %s (original: %s, data bits: %d)", st.portName, maskedMsg, msg, st.dataBits)
+	st.messageChan <- "TX:" + maskedMsg // Добавляем префикс для отправленных сообщений
 
 	return nil
 }
@@ -160,9 +192,19 @@ func (st *SerialTerminal) readPort() {
 			}
 
 			if n > 0 {
-				receivedMessage := string(buf[:n])
-				log.Printf("Data received from %s: %q (%d bytes)", st.portName, receivedMessage, n)
-				st.messageChan <- "RX: " + receivedMessage
+				maskedData := make([]byte, n)
+				mask := byte((1 << st.dataBits) - 1)
+				if st.dataBits < 8 {
+					for i := 0; i < n; i++ {
+						maskedData[i] = buf[i] & mask
+					}
+				} else {
+					copy(maskedData, buf[:n])
+				}
+
+				receivedMessage := string(maskedData)
+				log.Printf("Data received from %s: %q (%d bytes, data bits: %d)", st.portName, receivedMessage, n, st.dataBits)
+				st.messageChan <- "RX:" + receivedMessage // Добавляем префикс для полученных сообщений
 			}
 
 			time.Sleep(time.Millisecond * 10)

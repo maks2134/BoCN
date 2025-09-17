@@ -12,30 +12,40 @@ import (
 )
 
 type TerminalUI struct {
-	terminal       *serialterminal.SerialTerminal
-	inputEntry     *widget.Entry
-	outputArea     *widget.Entry
-	openButton     *widget.Button
-	statusLabel    *widget.Label
-	portEntry      *widget.Entry
-	byteSizeSelect *widget.Select
-	window         fyne.Window
+	terminal         *serialterminal.SerialTerminal
+	inputEntry       *widget.Entry
+	sentMessages     *widget.Entry
+	receivedMessages *widget.Entry
+	openButton       *widget.Button
+	statusLabel      *widget.Label
+	portEntry        *widget.Entry
+	byteSizeSelect   *widget.Select
+	window           fyne.Window
 }
 
 func New(term *serialterminal.SerialTerminal, w fyne.Window) *TerminalUI {
 	ui := &TerminalUI{
-		terminal:       term,
-		window:         w,
-		inputEntry:     widget.NewEntry(),
-		outputArea:     widget.NewMultiLineEntry(),
-		statusLabel:    widget.NewLabel("Port closed"),
-		portEntry:      widget.NewEntry(),
-		byteSizeSelect: widget.NewSelect([]string{"5", "6", "7", "8"}, nil),
+		terminal:         term,
+		window:           w,
+		inputEntry:       widget.NewEntry(),
+		sentMessages:     widget.NewMultiLineEntry(),
+		receivedMessages: widget.NewMultiLineEntry(),
+		statusLabel:      widget.NewLabel("Port closed"),
+		portEntry:        widget.NewEntry(),
+		byteSizeSelect:   widget.NewSelect([]string{"5", "6", "7", "8"}, nil),
 	}
 
-	ui.outputArea.Disable()
-	ui.outputArea.SetMinRowsVisible(10)
-	ui.outputArea.Wrapping = fyne.TextWrapWord
+	// Настраиваем поля сообщений
+	ui.sentMessages.Disable()
+	ui.sentMessages.SetMinRowsVisible(5)
+	ui.sentMessages.Wrapping = fyne.TextWrapWord
+	ui.sentMessages.SetPlaceHolder("")
+
+	ui.receivedMessages.Disable()
+	ui.receivedMessages.SetMinRowsVisible(5)
+	ui.receivedMessages.Wrapping = fyne.TextWrapWord
+	ui.receivedMessages.SetPlaceHolder("")
+
 	ui.inputEntry.Disable()
 
 	ui.terminal.OnMessage = ui.handleMessage
@@ -60,12 +70,34 @@ func New(term *serialterminal.SerialTerminal, w fyne.Window) *TerminalUI {
 }
 
 func (ui *TerminalUI) handleMessage(msg string) {
-	currentText := ui.outputArea.Text
-	if currentText != "" {
-		currentText += "\n"
+	// Определяем тип сообщения по префиксу
+	if len(msg) > 3 && msg[:3] == "TX:" {
+		// Отправленное сообщение
+		message := msg[3:] // Убираем префикс "TX:"
+		currentText := ui.sentMessages.Text
+		if currentText != "" {
+			currentText += "\n"
+		}
+		ui.sentMessages.SetText(currentText + message)
+		ui.sentMessages.CursorRow = len(ui.sentMessages.Text)
+	} else if len(msg) > 3 && msg[:3] == "RX:" {
+		// Полученное сообщение
+		message := msg[3:] // Убираем префикс "RX:"
+		currentText := ui.receivedMessages.Text
+		if currentText != "" {
+			currentText += "\n"
+		}
+		ui.receivedMessages.SetText(currentText + message)
+		ui.receivedMessages.CursorRow = len(ui.receivedMessages.Text)
+	} else {
+		// Сообщение без префикса (для обратной совместимости)
+		currentText := ui.receivedMessages.Text
+		if currentText != "" {
+			currentText += "\n"
+		}
+		ui.receivedMessages.SetText(currentText + msg)
+		ui.receivedMessages.CursorRow = len(ui.receivedMessages.Text)
 	}
-	ui.outputArea.SetText(currentText + msg)
-	ui.outputArea.CursorRow = len(ui.outputArea.Text)
 }
 
 func (ui *TerminalUI) handleStatus(status string) {
@@ -83,12 +115,12 @@ func (ui *TerminalUI) togglePort() {
 	if !ui.terminal.IsConnected() {
 		err := ui.terminal.Connect()
 		if err != nil {
-			dialog.ShowError(err, ui.window)
+			ui.showErrorDialog("Port Opening Failed", err.Error())
 		}
 	} else {
 		err := ui.terminal.Disconnect()
 		if err != nil {
-			dialog.ShowError(err, ui.window)
+			ui.showErrorDialog("Port Closing Failed", err.Error())
 		}
 	}
 }
@@ -101,14 +133,18 @@ func (ui *TerminalUI) sendData() {
 
 	err := ui.terminal.SendMessage(msg)
 	if err != nil {
-		dialog.ShowError(err, ui.window)
+		ui.showErrorDialog("Message Sending Failed", err.Error())
 	} else {
 		ui.inputEntry.SetText("")
 	}
 }
 
+func (ui *TerminalUI) showErrorDialog(title, message string) {
+	dialog.ShowCustom(title, "OK", widget.NewLabel(message), ui.window)
+}
+
 func (ui *TerminalUI) Layout() fyne.CanvasObject {
-	sendButton := widget.NewButton("Send Data", func() {
+	sendButton := widget.NewButton("Send Message", func() {
 		ui.sendData()
 	})
 
@@ -125,8 +161,26 @@ func (ui *TerminalUI) Layout() fyne.CanvasObject {
 		settingsGrid,
 	)
 
-	outputScroll := container.NewScroll(ui.outputArea)
-	outputScroll.SetMinSize(fyne.NewSize(400, 300))
+	// Создаем раздельные скроллируемые области для отправленных и полученных сообщений
+	sentScroll := container.NewScroll(ui.sentMessages)
+	sentScroll.SetMinSize(fyne.NewSize(380, 150))
+
+	receivedScroll := container.NewScroll(ui.receivedMessages)
+	receivedScroll.SetMinSize(fyne.NewSize(380, 150))
+
+	// Группируем отправленные и полученные сообщения
+	messagesGroup := container.NewGridWithColumns(2,
+		container.NewBorder(
+			widget.NewLabel("Sent Messages"),
+			nil, nil, nil,
+			sentScroll,
+		),
+		container.NewBorder(
+			widget.NewLabel("Received Messages"),
+			nil, nil, nil,
+			receivedScroll,
+		),
+	)
 
 	return container.NewVBox(
 		container.NewHBox(
@@ -135,10 +189,9 @@ func (ui *TerminalUI) Layout() fyne.CanvasObject {
 			ui.openButton,
 		),
 		settingsBox,
-		widget.NewLabel("Data to send:"),
+		widget.NewLabel("Message to send:"),
 		ui.inputEntry,
 		sendButton,
-		widget.NewLabel("Communication log:"),
-		outputScroll,
+		messagesGroup,
 	)
 }
