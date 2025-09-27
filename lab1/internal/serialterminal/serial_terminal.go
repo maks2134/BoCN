@@ -149,7 +149,7 @@ func (st *SerialTerminal) SendMessage(msg string) error {
 	}
 
 	log.Printf("Data sent to %s: %s (original: %s, data bits: %d)", st.portName, maskedMsg, msg, st.dataBits)
-	st.messageChan <- "TX:" + maskedMsg // Добавляем префикс для отправленных сообщений
+	st.messageChan <- "TX:" + maskedMsg
 
 	return nil
 }
@@ -204,7 +204,7 @@ func (st *SerialTerminal) readPort() {
 
 				receivedMessage := string(maskedData)
 				log.Printf("Data received from %s: %q (%d bytes, data bits: %d)", st.portName, receivedMessage, n, st.dataBits)
-				st.messageChan <- "RX:" + receivedMessage // Добавляем префикс для полученных сообщений
+				st.messageChan <- "RX:" + receivedMessage
 			}
 
 			time.Sleep(time.Millisecond * 10)

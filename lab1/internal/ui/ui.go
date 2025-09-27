@@ -90,7 +90,6 @@ func (ui *TerminalUI) handleMessage(msg string) {
 		ui.receivedMessages.SetText(currentText + message)
 		ui.receivedMessages.CursorRow = len(ui.receivedMessages.Text)
 	} else {
-		// Сообщение без префикса (для обратной совместимости)
 		currentText := ui.receivedMessages.Text
 		if currentText != "" {
 			currentText += "\n"
@@ -161,14 +160,12 @@ func (ui *TerminalUI) Layout() fyne.CanvasObject {
 		settingsGrid,
 	)
 
-	// Создаем раздельные скроллируемые области для отправленных и полученных сообщений
 	sentScroll := container.NewScroll(ui.sentMessages)
 	sentScroll.SetMinSize(fyne.NewSize(380, 150))
 
 	receivedScroll := container.NewScroll(ui.receivedMessages)
 	receivedScroll.SetMinSize(fyne.NewSize(380, 150))
 
-	// Группируем отправленные и полученные сообщения
 	messagesGroup := container.NewGridWithColumns(2,
 		container.NewBorder(
 			widget.NewLabel("Sent Messages"),
