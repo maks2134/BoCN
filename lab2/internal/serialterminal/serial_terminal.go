@@ -5,8 +5,12 @@ import (
 	"io"
 	"log"
 	"os"
+	"strings"
 	"time"
 
+	"oks/internal/packet"
+
+	"fyne.io/fyne/v2"
 	"github.com/tarm/serial"
 )
 
@@ -16,8 +20,11 @@ type SerialTerminal struct {
 	dataBits    int
 	stopReading chan bool
 	messageChan chan string
+	packetChan  chan string
+	bitStuffer  *packet.BitStuffer
 	OnMessage   func(string)
 	OnStatus    func(string)
+	OnPacket    func(string)
 }
 
 func New(name string) *SerialTerminal {
@@ -26,8 +33,11 @@ func New(name string) *SerialTerminal {
 		dataBits:    8,
 		stopReading: make(chan bool, 1),
 		messageChan: make(chan string, 100),
+		packetChan:  make(chan string, 50),
+		bitStuffer:  packet.NewBitStuffer(),
 		OnMessage:   func(string) {},
 		OnStatus:    func(string) {},
+		OnPacket:    func(string) {},
 	}
 }
 
@@ -41,9 +51,15 @@ func (st *SerialTerminal) SetDataBits(dataBits int) {
 
 	if st.port != nil && oldDataBits != dataBits {
 		log.Printf("Data bits changed from %d to %d, reconnecting...", oldDataBits, dataBits)
-		st.Disconnect()
+		err := st.Disconnect()
+		if err != nil {
+			return
+		}
 		time.Sleep(time.Millisecond * 100)
-		st.Connect()
+		err = st.Connect()
+		if err != nil {
+			return
+		}
 	}
 }
 
@@ -131,27 +147,37 @@ func (st *SerialTerminal) applyDataBitMask(msg string) string {
 	return string(result)
 }
 
-func (st *SerialTerminal) SendMessage(msg string) error {
+func (st *SerialTerminal) SendPacket(address, control byte, data string) error {
 	if st.port == nil {
 		return fmt.Errorf("port is not open")
 	}
 
-	if msg == "" {
-		return nil
-	}
+	p := packet.NewPacket(address, control, data)
 
-	maskedMsg := st.applyDataBitMask(msg)
-	message := maskedMsg + "\r\n"
+	stuffedData := st.bitStuffer.StuffPacket(p)
 
-	_, err := st.port.Write([]byte(message))
+	packetInfo := st.bitStuffer.GetStuffedFrameInfo(p)
+	st.packetChan <- packetInfo
+
+	_, err := st.port.Write([]byte(stuffedData))
 	if err != nil {
 		return st.formatError("write to", err)
 	}
 
-	log.Printf("Data sent to %s: %s (original: %s, data bits: %d)", st.portName, maskedMsg, msg, st.dataBits)
-	st.messageChan <- "TX:" + maskedMsg
+	log.Printf("Packet sent to %s: Address=0x%02X, Control=0x%02X, Data=%s",
+		st.portName, address, control, data)
+	st.messageChan <- "TX:" + data
 
 	return nil
+}
+
+func (st *SerialTerminal) SendMessage(msg string) error {
+	address := byte(0x01)
+	if strings.Contains(st.portName, "ttys003") {
+		address = 0x02
+	}
+
+	return st.SendPacket(address, 0x00, msg)
 }
 
 func (st *SerialTerminal) messageHandler() {
@@ -159,7 +185,11 @@ func (st *SerialTerminal) messageHandler() {
 		select {
 		case msg := <-st.messageChan:
 			if st.OnMessage != nil {
-				st.OnMessage(msg)
+				fyne.Do(func() { st.OnMessage(msg) })
+			}
+		case packetInfo := <-st.packetChan:
+			if st.OnPacket != nil {
+				fyne.Do(func() { st.OnPacket(packetInfo) })
 			}
 		case <-st.stopReading:
 			return
@@ -168,7 +198,8 @@ func (st *SerialTerminal) messageHandler() {
 }
 
 func (st *SerialTerminal) readPort() {
-	buf := make([]byte, 256)
+	buf := make([]byte, 512)
+	var receivedBits string
 
 	for {
 		select {
@@ -192,19 +223,46 @@ func (st *SerialTerminal) readPort() {
 			}
 
 			if n > 0 {
-				maskedData := make([]byte, n)
-				mask := byte((1 << st.dataBits) - 1)
-				if st.dataBits < 8 {
-					for i := 0; i < n; i++ {
-						maskedData[i] = buf[i] & mask
-					}
-				} else {
-					copy(maskedData, buf[:n])
-				}
+				chunkBits := packet.BytesToBinaryString(string(buf[:n]))
+				receivedBits += chunkBits
 
-				receivedMessage := string(maskedData)
-				log.Printf("Data received from %s: %q (%d bytes, data bits: %d)", st.portName, receivedMessage, n, st.dataBits)
-				st.messageChan <- "RX:" + receivedMessage
+				flagBits := "00001110"
+				for {
+					startBit := strings.Index(receivedBits, flagBits)
+					if startBit == -1 {
+						if len(receivedBits) > 8*1024*10 {
+							receivedBits = ""
+						}
+						break
+					}
+
+					rel := strings.Index(receivedBits[startBit+8:], flagBits)
+					if rel == -1 {
+						break
+					}
+					endBit := startBit + 8 + rel
+
+					frameBits := receivedBits[startBit : endBit+8]
+
+					frameBytes := packet.BinaryStringToBytes(frameBits)
+					fb := []byte(frameBytes)
+					log.Printf("Detected frame bits: start=%d end=%d bitsLen=%d bytesLen=%d hex=%x",
+						startBit, endBit+8, len(frameBits), len(fb), fb)
+
+					packetObj := st.bitStuffer.DestuffPacket(frameBytes)
+					receivedBits = receivedBits[endBit+8:]
+
+					if packetObj != nil && packetObj.VerifyFCS() {
+						log.Printf("Packet received from %s: Address=0x%02X, Control=0x%02X, Data=%s",
+							st.portName, packetObj.Address, packetObj.Control, packetObj.Data)
+						st.messageChan <- "RX:" + packetObj.Data
+					} else if packetObj != nil {
+						log.Printf("Invalid packet received from %s: FCS error; frame hex=%x",
+							st.portName, fb)
+					} else {
+						log.Printf("DestuffPacket returned nil (invalid frame) for bytes: %x", fb)
+					}
+				}
 			}
 
 			time.Sleep(time.Millisecond * 10)

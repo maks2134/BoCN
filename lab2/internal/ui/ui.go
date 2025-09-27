@@ -16,6 +16,7 @@ type TerminalUI struct {
 	inputEntry       *widget.Entry
 	sentMessages     *widget.Entry
 	receivedMessages *widget.Entry
+	sentPacketInfo   *widget.RichText
 	openButton       *widget.Button
 	statusLabel      *widget.Label
 	portEntry        *widget.Entry
@@ -30,12 +31,12 @@ func New(term *serialterminal.SerialTerminal, w fyne.Window) *TerminalUI {
 		inputEntry:       widget.NewEntry(),
 		sentMessages:     widget.NewMultiLineEntry(),
 		receivedMessages: widget.NewMultiLineEntry(),
+		sentPacketInfo:   widget.NewRichTextFromMarkdown(""),
 		statusLabel:      widget.NewLabel("Port closed"),
 		portEntry:        widget.NewEntry(),
 		byteSizeSelect:   widget.NewSelect([]string{"5", "6", "7", "8"}, nil),
 	}
 
-	// Настраиваем поля сообщений
 	ui.sentMessages.Disable()
 	ui.sentMessages.SetMinRowsVisible(5)
 	ui.sentMessages.Wrapping = fyne.TextWrapWord
@@ -46,10 +47,13 @@ func New(term *serialterminal.SerialTerminal, w fyne.Window) *TerminalUI {
 	ui.receivedMessages.Wrapping = fyne.TextWrapWord
 	ui.receivedMessages.SetPlaceHolder("")
 
+	ui.sentPacketInfo.ParseMarkdown("Frame structure will appear here after sending a message")
+
 	ui.inputEntry.Disable()
 
 	ui.terminal.OnMessage = ui.handleMessage
 	ui.terminal.OnStatus = ui.handleStatus
+	ui.terminal.OnPacket = ui.handlePacket
 
 	ui.portEntry.SetText(ui.terminal.GetPortName())
 	ui.byteSizeSelect.SetSelected(strconv.Itoa(ui.terminal.GetDataBits()))
@@ -70,10 +74,8 @@ func New(term *serialterminal.SerialTerminal, w fyne.Window) *TerminalUI {
 }
 
 func (ui *TerminalUI) handleMessage(msg string) {
-	// Определяем тип сообщения по префиксу
 	if len(msg) > 3 && msg[:3] == "TX:" {
-		// Отправленное сообщение
-		message := msg[3:] // Убираем префикс "TX:"
+		message := msg[3:]
 		currentText := ui.sentMessages.Text
 		if currentText != "" {
 			currentText += "\n"
@@ -81,8 +83,7 @@ func (ui *TerminalUI) handleMessage(msg string) {
 		ui.sentMessages.SetText(currentText + message)
 		ui.sentMessages.CursorRow = len(ui.sentMessages.Text)
 	} else if len(msg) > 3 && msg[:3] == "RX:" {
-		// Полученное сообщение
-		message := msg[3:] // Убираем префикс "RX:"
+		message := msg[3:]
 		currentText := ui.receivedMessages.Text
 		if currentText != "" {
 			currentText += "\n"
@@ -96,6 +97,12 @@ func (ui *TerminalUI) handleMessage(msg string) {
 		}
 		ui.receivedMessages.SetText(currentText + msg)
 		ui.receivedMessages.CursorRow = len(ui.receivedMessages.Text)
+	}
+}
+
+func (ui *TerminalUI) handlePacket(packetInfo string) {
+	if ui.terminal.GetPortName() == ui.portEntry.Text {
+		ui.sentPacketInfo.ParseMarkdown(packetInfo)
 	}
 }
 
@@ -179,6 +186,15 @@ func (ui *TerminalUI) Layout() fyne.CanvasObject {
 		),
 	)
 
+	packetInfoScroll := container.NewScroll(ui.sentPacketInfo)
+	packetInfoScroll.SetMinSize(fyne.NewSize(800, 200))
+
+	packetInfoGroup := container.NewBorder(
+		widget.NewLabel("Transmitted Frame Structure"),
+		nil, nil, nil,
+		packetInfoScroll,
+	)
+
 	return container.NewVBox(
 		container.NewHBox(
 			widget.NewLabel("Status:"),
@@ -190,5 +206,6 @@ func (ui *TerminalUI) Layout() fyne.CanvasObject {
 		ui.inputEntry,
 		sendButton,
 		messagesGroup,
+		packetInfoGroup,
 	)
 }
