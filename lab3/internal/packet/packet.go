@@ -124,9 +124,9 @@ func ParseFrame(frameData string) *Packet {
 
 	if len(packetData) > 3 {
 		packet.Data = packetData[2 : len(packetData)-1]
-		packet.FCS = uint8(packetData[len(packetData)-1])
+		packet.FCS = packetData[len(packetData)-1]
 	} else {
-		packet.FCS = uint8(packetData[2])
+		packet.FCS = packetData[2]
 	}
 
 	return packet
