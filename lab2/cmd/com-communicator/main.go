@@ -13,10 +13,9 @@ func main() {
 	myApp := app.New()
 	myWindow := myApp.NewWindow("Serial Port Communicator")
 	myWindow.Resize(fyne.NewSize(800, 700))
-	myWindow.SetFullScreen(true)
 
 	terminal1 := serialterminal.New("/dev/ttys001")
-	terminal2 := serialterminal.New("/dev/ttys003")
+	terminal2 := serialterminal.New("/dev/ttys002")
 
 	ui1 := ui.New(terminal1, myWindow)
 	ui2 := ui.New(terminal2, myWindow)

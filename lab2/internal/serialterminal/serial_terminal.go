@@ -199,7 +199,7 @@ func (st *SerialTerminal) messageHandler() {
 
 func (st *SerialTerminal) readPort() {
 	buf := make([]byte, 512)
-	var receivedBits string
+	var receivedData string // Изменяем на строку байтов, а не битов
 
 	for {
 		select {
@@ -223,34 +223,34 @@ func (st *SerialTerminal) readPort() {
 			}
 
 			if n > 0 {
-				chunkBits := packet.BytesToBinaryString(string(buf[:n]))
-				receivedBits += chunkBits
+				receivedData += string(buf[:n])
 
-				flagBits := "00001110"
+				// Ищем флаги в сырых данных
+				flag := byte(0x0E)
 				for {
-					startBit := strings.Index(receivedBits, flagBits)
-					if startBit == -1 {
-						if len(receivedBits) > 8*1024*10 {
-							receivedBits = ""
+					startIdx := strings.IndexByte(receivedData, flag)
+					if startIdx == -1 {
+						if len(receivedData) > 1024 {
+							receivedData = ""
 						}
 						break
 					}
 
-					rel := strings.Index(receivedBits[startBit+8:], flagBits)
-					if rel == -1 {
+					// Ищем следующий флаг после стартового
+					endIdx := strings.IndexByte(receivedData[startIdx+1:], flag)
+					if endIdx == -1 {
 						break
 					}
-					endBit := startBit + 8 + rel
+					endIdx += startIdx + 1
 
-					frameBits := receivedBits[startBit : endBit+8]
+					// Извлекаем полный фрейм включая флаги
+					frameData := receivedData[startIdx : endIdx+1]
 
-					frameBytes := packet.BinaryStringToBytes(frameBits)
-					fb := []byte(frameBytes)
-					log.Printf("Detected frame bits: start=%d end=%d bitsLen=%d bytesLen=%d hex=%x",
-						startBit, endBit+8, len(frameBits), len(fb), fb)
+					// Обрабатываем через DestuffPacket
+					packetObj := st.bitStuffer.DestuffPacket(frameData)
 
-					packetObj := st.bitStuffer.DestuffPacket(frameBytes)
-					receivedBits = receivedBits[endBit+8:]
+					// Убираем обработанные данные из буфера
+					receivedData = receivedData[endIdx+1:]
 
 					if packetObj != nil && packetObj.VerifyFCS() {
 						log.Printf("Packet received from %s: Address=0x%02X, Control=0x%02X, Data=%s",
@@ -258,9 +258,7 @@ func (st *SerialTerminal) readPort() {
 						st.messageChan <- "RX:" + packetObj.Data
 					} else if packetObj != nil {
 						log.Printf("Invalid packet received from %s: FCS error; frame hex=%x",
-							st.portName, fb)
-					} else {
-						log.Printf("DestuffPacket returned nil (invalid frame) for bytes: %x", fb)
+							st.portName, []byte(frameData))
 					}
 				}
 			}
