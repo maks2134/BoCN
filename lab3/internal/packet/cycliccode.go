@@ -133,13 +133,3 @@ func (cc *CyclicCode) SimulateBitCorruption(data string) string {
 func (cc *CyclicCode) GetFCSLength() int {
 	return cc.fcsLength
 }
-
-func binaryStringToUint(binaryStr string) uint64 {
-	var result uint64
-	for i, bit := range binaryStr {
-		if bit == '1' {
-			result |= 1 << (len(binaryStr) - 1 - i)
-		}
-	}
-	return result
-}
