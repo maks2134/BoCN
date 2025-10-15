@@ -79,7 +79,7 @@ func (st *SerialTerminal) Connect() error {
 	c := &serial.Config{
 		Name:        st.portName,
 		Baud:        9600,
-		ReadTimeout: time.Second * 1,
+		ReadTimeout: time.Millisecond * 50,
 		Size:        byte(st.dataBits),
 		Parity:      serial.ParityNone,
 		StopBits:    serial.Stop1,
@@ -152,15 +152,15 @@ func (st *SerialTerminal) SendPacket(address, control byte, data string) error {
 		return fmt.Errorf("port is not open")
 	}
 
-	p := packet.NewPacket(address, control, data)
-
-	p.SimulateCorruption()
+	original := packet.NewPacket(address, control, data)
+	corrupted := packet.NewPacket(address, control, data)
+	corrupted.SimulateCorruption()
 	log.Printf("Bit corruption simulated for packet: Address=0x%02X, Control=0x%02X, Data=%s, FCS=0x%02X",
-		address, control, p.Data, p.FCS)
+		address, control, corrupted.Data, corrupted.FCS)
 
-	stuffedData := st.bitStuffer.StuffPacket(p)
+	stuffedData := st.bitStuffer.StuffPacket(original)
 
-	packetInfo := st.bitStuffer.GetStuffedFrameInfo(p)
+	packetInfo := st.bitStuffer.GetTransmissionInfo(original, corrupted)
 	st.packetChan <- packetInfo
 
 	_, err := st.port.Write([]byte(stuffedData))
@@ -169,8 +169,8 @@ func (st *SerialTerminal) SendPacket(address, control byte, data string) error {
 	}
 
 	log.Printf("Packet sent to %s: Address=0x%02X, Control=0x%02X, Data=%s, FCS=0x%02X",
-		st.portName, address, control, p.Data, p.FCS)
-	st.messageChan <- "TX:" + p.Data
+		st.portName, address, control, original.Data, original.FCS)
+	st.messageChan <- "TX:" + original.Data
 
 	return nil
 }
@@ -247,29 +247,36 @@ func (st *SerialTerminal) readPort() {
 
 					frameData := receivedData[startIdx : endIdx+1]
 					packetObj := st.bitStuffer.DestuffPacket(frameData)
+
+					if packetObj == nil {
+						// false flag, drop one byte after start and search again
+						receivedData = receivedData[startIdx+1:]
+						continue
+					}
+
+					hasErrors, errorCount, correctedData := packetObj.DetectAndCorrectErrors()
+
+					// consume only when we have a frame to act on
 					receivedData = receivedData[endIdx+1:]
 
-					if packetObj != nil {
-						hasErrors, errorCount, correctedData := packetObj.DetectAndCorrectErrors()
-
-						if !hasErrors {
-							log.Printf("Packet received from %s: Address=0x%02X, Control=0x%02X, Data=%s, FCS=0x%02X",
-								st.portName, packetObj.Address, packetObj.Control, packetObj.Data, packetObj.FCS)
-							st.messageChan <- "RX:" + packetObj.Data
-						} else if errorCount == 1 {
-							log.Printf("Single error detected and corrected from %s: Original=%s, Corrected=%s, FCS=0x%02X",
-								st.portName, packetObj.Data, correctedData, packetObj.FCS)
-							st.messageChan <- "RX:" + correctedData + " (corrected)"
-						} else {
-							log.Printf("Double error detected from %s: Data=%s, FCS=0x%02X (cannot correct)",
-								st.portName, packetObj.Data, packetObj.FCS)
-							st.messageChan <- "RX: ERROR - Double bit error detected (cannot correct)"
-						}
+					if !hasErrors {
+						log.Printf("Packet received from %s: Address=0x%02X, Control=0x%02X, Data=%s, FCS=0x%02X",
+							st.portName, packetObj.Address, packetObj.Control, packetObj.Data, packetObj.FCS)
+						st.messageChan <- "RX:" + packetObj.Data
+					} else if errorCount == 1 {
+						log.Printf("Single error detected and corrected from %s: Original=%s, Corrected=%s, FCS=0x%02X",
+							st.portName, packetObj.Data, correctedData, packetObj.FCS)
+						st.messageChan <- "RX:" + correctedData
+					} else if errorCount == 2 {
+						log.Printf("Double error detected from %s: Data=%s, FCS=0x%02X (cannot correct)",
+							st.portName, packetObj.Data, packetObj.FCS)
+						st.messageChan <- "RX: ERROR - Double bit error detected (cannot correct)"
+					} else {
+						st.messageChan <- "RX: ERROR - Uncorrectable error"
 					}
 				}
 			}
 
-			time.Sleep(time.Millisecond * 10)
 		}
 	}
 }

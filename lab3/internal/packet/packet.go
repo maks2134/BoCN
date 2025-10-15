@@ -73,18 +73,9 @@ func BytesToBinaryString(data string) string {
 }
 
 func BinaryStringToBytes(binStr string) string {
-	if len(binStr)%8 != 0 {
-		padding := 8 - (len(binStr) % 8)
-		binStr += strings.Repeat("0", padding)
-	}
-
 	var result []byte
-	for i := 0; i < len(binStr); i += 8 {
-		end := i + 8
-		if end > len(binStr) {
-			end = len(binStr)
-		}
-		byteStr := binStr[i:end]
+	for i := 0; i+8 <= len(binStr); i += 8 {
+		byteStr := binStr[i : i+8]
 		if val, err := strconv.ParseUint(byteStr, 2, 8); err == nil {
 			result = append(result, byte(val))
 		}

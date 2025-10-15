@@ -6,34 +6,30 @@ import (
 )
 
 type CyclicCode struct {
-	generator uint16
+	generator uint8
 	fcsLength int
 }
 
 func NewCyclicCode() *CyclicCode {
 	return &CyclicCode{
-		generator: 0x107,
+		generator: 0x07,
 		fcsLength: 8,
 	}
 }
 
 func (cc *CyclicCode) CalculateFCS(data string) uint8 {
-	if len(data) == 0 {
-		return 0
-	}
-
-	dataBinary := BytesToBinaryString(data)
-	remainder := uint64(0)
-
-	for i := 0; i < len(dataBinary); i++ {
-		remainder = (remainder << 1) | uint64(dataBinary[i]-'0')
-
-		if remainder >= (1 << 9) {
-			remainder ^= uint64(cc.generator)
+	var crc uint8 = 0x00
+	for _, b := range []byte(data) {
+		crc ^= uint8(b)
+		for i := 0; i < 8; i++ {
+			if (crc & 0x80) != 0 {
+				crc = (crc << 1) ^ cc.generator
+			} else {
+				crc <<= 1
+			}
 		}
 	}
-
-	return uint8(remainder)
+	return crc
 }
 
 func (cc *CyclicCode) VerifyFCS(data string, receivedFCS uint8) bool {
@@ -56,14 +52,11 @@ func (cc *CyclicCode) polynomialDivision(dividend uint64, dividendLength int) ui
 
 func (cc *CyclicCode) DetectErrors(data string, receivedFCS uint8) (bool, int, string) {
 	calculatedFCS := cc.CalculateFCS(data)
-
 	if calculatedFCS == receivedFCS {
 		return false, 0, data
 	}
 
-	syndrome := calculatedFCS ^ receivedFCS
-
-	correctedData, correctionSuccess := cc.correctSingleError(data, syndrome)
+	correctedData, correctionSuccess := cc.correctSingleError(data, receivedFCS)
 	if correctionSuccess {
 		return true, 1, correctedData
 	}
@@ -71,7 +64,7 @@ func (cc *CyclicCode) DetectErrors(data string, receivedFCS uint8) (bool, int, s
 	return true, 2, data
 }
 
-func (cc *CyclicCode) correctSingleError(data string, syndrome uint8) (string, bool) {
+func (cc *CyclicCode) correctSingleError(data string, receivedFCS uint8) (string, bool) {
 	dataBinary := BytesToBinaryString(data)
 
 	for i := 0; i < len(dataBinary); i++ {
@@ -84,8 +77,7 @@ func (cc *CyclicCode) correctSingleError(data string, syndrome uint8) (string, b
 
 		correctedDataStr := BinaryStringToBytes(string(flippedData))
 		correctedFCS := cc.CalculateFCS(correctedDataStr)
-
-		if correctedFCS == syndrome {
+		if correctedFCS == receivedFCS {
 			return correctedDataStr, true
 		}
 	}
