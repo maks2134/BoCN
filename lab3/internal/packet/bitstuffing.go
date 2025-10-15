@@ -263,7 +263,7 @@ func (bs *BitStuffer) GetTransmissionInfo(original *Packet, corrupted *Packet) s
 			preGroups = append(preGroups, preStuff[i:i+8])
 		}
 	}
-	md.WriteString("**Original frame before bit-stuffing (with corrupted payload):**\n\n```text\n")
+	md.WriteString("**Original frame:**\n\n```text\n")
 	bytesPerLine := 16
 	for i := 0; i < len(preGroups); i += bytesPerLine {
 		end := i + bytesPerLine
@@ -275,7 +275,7 @@ func (bs *BitStuffer) GetTransmissionInfo(original *Packet, corrupted *Packet) s
 	}
 	md.WriteString("```\n\n")
 
-	md.WriteString("**Packet after bit-stuffing:**\n\n```text\n")
+	md.WriteString("**Frame after bit-stuffing:**\n\n```text\n")
 	for i := 0; i < len(stuffedGroups); i += bytesPerLine {
 		end := i + bytesPerLine
 		if end > len(stuffedGroups) {
