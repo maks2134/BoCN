@@ -236,25 +236,25 @@ func (bs *BitStuffer) GetTransmissionInfo(original *Packet, corrupted *Packet) s
 	md.WriteString(fmt.Sprintf("**Control:** %d (%08b)\n\n", ctrl, ctrl))
 	md.WriteString(fmt.Sprintf("**FCS:** 0x%02X (%08b) \n\n", fcs, fcs))
 
-	md.WriteString("**Original data (string):**\n\n")
-	md.WriteString("```text\n")
-	md.WriteString(original.Data + "\n")
-	md.WriteString("```\n\n")
+	//md.WriteString("**Original data (string):**\n\n")
+	//md.WriteString("```text\n")
+	//md.WriteString(original.Data + "\n")
+	//md.WriteString("```\n\n")
 
-	md.WriteString("**Original data (binary):**\n\n")
+	md.WriteString("**Original data:**\n\n")
 	md.WriteString("```text\n")
 	md.WriteString(groupBinary(originalDataBinary) + "\n")
 	md.WriteString("```\n\n")
 
-	md.WriteString("**Corrupted data (string):**\n\n")
-	md.WriteString("```text\n")
-	md.WriteString(corrupted.Data + "\n")
-	md.WriteString("```\n\n")
+	//md.WriteString("**Corrupted data (string):**\n\n")
+	//md.WriteString("```text\n")
+	//md.WriteString(corrupted.Data + "\n")
+	//md.WriteString("```\n\n")
 
-	md.WriteString("**Corrupted data (binary):**\n\n")
-	md.WriteString("```text\n")
-	md.WriteString(groupBinary(corruptedDataBinary) + "\n")
-	md.WriteString("```\n\n")
+	//md.WriteString("**Corrupted data (binary):**\n\n")
+	//md.WriteString("```text\n")
+	//md.WriteString(groupBinary(corruptedDataBinary) + "\n")
+	//md.WriteString("```\n\n")
 
 	preStuff := flagBinary + addressBinary + controlBinary + corruptedDataBinary + fcsBinary + flagBinary
 	var preGroups []string

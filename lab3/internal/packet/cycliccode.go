@@ -12,7 +12,7 @@ type CyclicCode struct {
 
 func NewCyclicCode() *CyclicCode {
 	return &CyclicCode{
-		generator: 0x07,
+		generator: 0x07, //полином x² + x + 1x
 		fcsLength: 8,
 	}
 }

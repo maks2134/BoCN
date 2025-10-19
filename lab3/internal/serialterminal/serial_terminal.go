@@ -158,7 +158,7 @@ func (st *SerialTerminal) SendPacket(address, control byte, data string) error {
 	log.Printf("Bit corruption simulated for packet: Address=0x%02X, Control=0x%02X, Data=%s, FCS=0x%02X",
 		address, control, corrupted.Data, corrupted.FCS)
 
-	stuffedData := st.bitStuffer.StuffPacket(original)
+	stuffedData := st.bitStuffer.StuffPacket(corrupted)
 
 	packetInfo := st.bitStuffer.GetTransmissionInfo(original, corrupted)
 	st.packetChan <- packetInfo
@@ -270,9 +270,9 @@ func (st *SerialTerminal) readPort() {
 					} else if errorCount == 2 {
 						log.Printf("Double error detected from %s: Data=%s, FCS=0x%02X (cannot correct)",
 							st.portName, packetObj.Data, packetObj.FCS)
-						st.messageChan <- "RX: ERROR - Double bit error detected (cannot correct)"
+						// Suppress showing any message on RX for errored frames
 					} else {
-						st.messageChan <- "RX: ERROR - Uncorrectable error"
+						// Suppress showing any message on RX for unknown/uncorrectable errors
 					}
 				}
 			}
