@@ -50,7 +50,6 @@ func New(name string) *SerialTerminal {
 		OnChannelState: func(string) {},
 	}
 
-	// Set up CSMA/CD callbacks
 	csma.SetCallbacks(
 		func(state csmacd.ChannelState) {
 			log.Printf("CSMA/CD: Channel state changed to %s", csma.GetStateString())
@@ -329,14 +328,12 @@ func (st *SerialTerminal) readPort() {
 					packetObj := st.bitStuffer.DestuffPacket(frameData)
 
 					if packetObj == nil {
-						// false flag, drop one byte after start and search again
 						receivedData = receivedData[startIdx+1:]
 						continue
 					}
 
 					hasErrors, errorCount, correctedData := packetObj.DetectAndCorrectErrors()
 
-					// consume only when we have a frame to act on
 					receivedData = receivedData[endIdx+1:]
 
 					if !hasErrors {
@@ -350,9 +347,7 @@ func (st *SerialTerminal) readPort() {
 					} else if errorCount == 2 {
 						log.Printf("Double error detected from %s: Data=%s, FCS=0x%02X (cannot correct)",
 							st.portName, packetObj.Data, packetObj.FCS)
-						// Suppress showing any message on RX for errored frames
 					} else {
-						// Suppress showing any message on RX for unknown/uncorrectable errors
 					}
 				}
 			}

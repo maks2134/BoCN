@@ -12,7 +12,7 @@ type CyclicCode struct {
 
 func NewCyclicCode() *CyclicCode {
 	return &CyclicCode{
-		generator: 0x07, //полином x² + x + 1x
+		generator: 0x07,
 		fcsLength: 8,
 	}
 }
@@ -20,7 +20,7 @@ func NewCyclicCode() *CyclicCode {
 func (cc *CyclicCode) CalculateFCS(data string) uint8 {
 	var crc uint8 = 0x00
 	for _, b := range []byte(data) {
-		crc ^= uint8(b)
+		crc ^= b
 		for i := 0; i < 8; i++ {
 			if (crc & 0x80) != 0 {
 				crc = (crc << 1) ^ cc.generator

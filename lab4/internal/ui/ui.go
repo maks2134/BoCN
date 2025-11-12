@@ -3,6 +3,8 @@ package ui
 import (
 	"fmt"
 	"strconv"
+	"strings"
+	"time"
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/container"
@@ -22,43 +24,35 @@ type TerminalUI struct {
 	statusLabel      *widget.Label
 	portEntry        *widget.Entry
 	byteSizeSelect   *widget.Select
-	window           fyne.Window
-	// CSMA/CD UI elements
-	channelStateLabel   *widget.Label
-	collisionStatsLabel *widget.Label
-	emulationCheckbox   *widget.Check
-	busyProbEntry       *widget.Entry
-	collisionProbEntry  *widget.Entry
+
+	eventLog          *widget.Entry
+	emulationCheckbox *widget.Check
+
+	window fyne.Window
 }
 
 func New(term *serialterminal.SerialTerminal, w fyne.Window) *TerminalUI {
 	ui := &TerminalUI{
-		terminal:         term,
-		window:           w,
-		inputEntry:       widget.NewEntry(),
-		sentMessages:     widget.NewMultiLineEntry(),
-		receivedMessages: widget.NewMultiLineEntry(),
-		sentPacketInfo:   widget.NewRichTextFromMarkdown(""),
-		statusLabel:      widget.NewLabel("Port closed"),
-		portEntry:        widget.NewEntry(),
-		byteSizeSelect:   widget.NewSelect([]string{"5", "6", "7", "8"}, nil),
-		// CSMA/CD UI elements
-		channelStateLabel:   widget.NewLabel("Channel: Idle"),
-		collisionStatsLabel: widget.NewLabel("Collisions: 0 | Busy: 0 | Total: 0"),
-		emulationCheckbox:   widget.NewCheck("Enable CSMA/CD Emulation", nil),
-		busyProbEntry:       widget.NewEntry(),
-		collisionProbEntry:  widget.NewEntry(),
+		terminal:          term,
+		window:            w,
+		inputEntry:        widget.NewEntry(),
+		sentMessages:      widget.NewMultiLineEntry(),
+		receivedMessages:  widget.NewMultiLineEntry(),
+		sentPacketInfo:    widget.NewRichTextFromMarkdown(""),
+		statusLabel:       widget.NewLabel("Port closed"),
+		portEntry:         widget.NewEntry(),
+		byteSizeSelect:    widget.NewSelect([]string{"5", "6", "7", "8"}, nil),
+		eventLog:          widget.NewMultiLineEntry(),
+		emulationCheckbox: widget.NewCheck("Enable CSMA/CD Emulation", nil),
 	}
 
 	ui.sentMessages.Disable()
-	ui.sentMessages.SetMinRowsVisible(5)
+	ui.sentMessages.SetMinRowsVisible(3)
 	ui.sentMessages.Wrapping = fyne.TextWrapWord
-	ui.sentMessages.SetPlaceHolder("")
 
 	ui.receivedMessages.Disable()
-	ui.receivedMessages.SetMinRowsVisible(5)
+	ui.receivedMessages.SetMinRowsVisible(3)
 	ui.receivedMessages.Wrapping = fyne.TextWrapWord
-	ui.receivedMessages.SetPlaceHolder("")
 
 	ui.sentPacketInfo.ParseMarkdown("Frame structure will appear here after sending a message")
 
@@ -85,54 +79,62 @@ func New(term *serialterminal.SerialTerminal, w fyne.Window) *TerminalUI {
 	}
 
 	ui.emulationCheckbox.SetChecked(true)
-	ui.busyProbEntry.SetText("0.25")
-	ui.collisionProbEntry.SetText("0.75")
-
 	ui.emulationCheckbox.OnChanged = func(checked bool) {
 		ui.terminal.SetCSMAEmulation(checked)
-	}
-
-	ui.busyProbEntry.OnChanged = func(text string) {
-		if prob, err := strconv.ParseFloat(text, 64); err == nil && prob >= 0 && prob <= 1 {
-			ui.terminal.SetCSMAProbabilities(prob, 0.75)
+		if checked {
+			ui.terminal.SetCSMAProbabilities(0.25, 0.75)
 		}
 	}
 
-	ui.collisionProbEntry.OnChanged = func(text string) {
-		if prob, err := strconv.ParseFloat(text, 64); err == nil && prob >= 0 && prob <= 1 {
-			ui.terminal.SetCSMAProbabilities(0.25, prob)
-		}
-	}
+	ui.eventLog.Disable()
+	ui.eventLog.SetMinRowsVisible(6)
+	ui.eventLog.Wrapping = fyne.TextWrapWord
 
 	ui.openButton = widget.NewButton("Open Port", ui.togglePort)
 
 	return ui
 }
 
+func (ui *TerminalUI) handleCollision() {
+	ui.appendEventLogWithStats("Collision detected!")
+}
+
+func (ui *TerminalUI) handleChannelBusy() {
+	ui.appendEventLogWithStats("Channel busy detected")
+}
+
+func (ui *TerminalUI) handleChannelState(state string) {
+	ui.appendEventLogWithStats("Channel state changed: " + state)
+}
+
+func (ui *TerminalUI) appendEventLogWithStats(entry string) {
+	timestamp := time.Now().Format("15:04:05")
+	collisions, busy, total := ui.terminal.GetCSMAStatistics()
+	text := fmt.Sprintf("[%s] %s | Collisions=%d Busy=%d Total=%d", timestamp, entry, collisions, busy, total)
+	ui.appendEventLog(text)
+}
+
+func (ui *TerminalUI) appendEventLog(entry string) {
+	currentText := ui.eventLog.Text
+	if currentText != "" {
+		currentText += "\n"
+	}
+	ui.eventLog.SetText(currentText + entry)
+	ui.eventLog.CursorRow = len(strings.Split(ui.eventLog.Text, "\n"))
+}
+
 func (ui *TerminalUI) handleMessage(msg string) {
 	if len(msg) > 3 && msg[:3] == "TX:" {
 		message := msg[3:]
-		currentText := ui.sentMessages.Text
-		if currentText != "" {
-			currentText += "\n"
-		}
-		ui.sentMessages.SetText(currentText + message)
-		ui.sentMessages.CursorRow = len(ui.sentMessages.Text)
+		ui.sentMessages.SetText(ui.sentMessages.Text + "\n" + message)
+		ui.appendEventLogWithStats("Message sent: " + message)
 	} else if len(msg) > 3 && msg[:3] == "RX:" {
 		message := msg[3:]
-		currentText := ui.receivedMessages.Text
-		if currentText != "" {
-			currentText += "\n"
-		}
-		ui.receivedMessages.SetText(currentText + message)
-		ui.receivedMessages.CursorRow = len(ui.receivedMessages.Text)
+		ui.receivedMessages.SetText(ui.receivedMessages.Text + "\n" + message)
+		ui.appendEventLogWithStats("Message received: " + message)
 	} else {
-		currentText := ui.receivedMessages.Text
-		if currentText != "" {
-			currentText += "\n"
-		}
-		ui.receivedMessages.SetText(currentText + msg)
-		ui.receivedMessages.CursorRow = len(ui.receivedMessages.Text)
+		ui.receivedMessages.SetText(ui.receivedMessages.Text + "\n" + msg)
+		ui.appendEventLogWithStats("Message received: " + msg)
 	}
 }
 
@@ -151,24 +153,6 @@ func (ui *TerminalUI) handleStatus(status string) {
 		ui.openButton.SetText("Open Port")
 		ui.inputEntry.Disable()
 	}
-}
-
-func (ui *TerminalUI) handleCollision() {
-	ui.updateCollisionStats()
-}
-
-func (ui *TerminalUI) handleChannelBusy() {
-	ui.updateCollisionStats()
-}
-
-func (ui *TerminalUI) handleChannelState(state string) {
-	ui.channelStateLabel.SetText("Channel: " + state)
-}
-
-func (ui *TerminalUI) updateCollisionStats() {
-	collisions, busy, total := ui.terminal.GetCSMAStatistics()
-	ui.collisionStatsLabel.SetText(fmt.Sprintf("Collisions: %d | Busy: %d | Total: %d",
-		collisions, busy, total))
 }
 
 func (ui *TerminalUI) togglePort() {
@@ -214,81 +198,67 @@ func (ui *TerminalUI) Layout() fyne.CanvasObject {
 		widget.NewLabel("Data Bits:"),
 		ui.byteSizeSelect,
 	)
-
 	settingsBox := container.NewBorder(
 		widget.NewLabel("Port Configuration"),
 		nil, nil, nil,
 		settingsGrid,
 	)
 
-	csmaConfigGrid := container.NewGridWithColumns(2,
-		widget.NewLabel("Busy Probability:"),
-		ui.busyProbEntry,
-		widget.NewLabel("Collision Probability:"),
-		ui.collisionProbEntry,
-	)
-
-	csmaConfigBox := container.NewBorder(
+	csmaConfigBox := container.NewVBox(
 		widget.NewLabel("CSMA/CD Configuration"),
-		nil, nil, nil,
-		container.NewVBox(
-			ui.emulationCheckbox,
-			csmaConfigGrid,
-		),
+		ui.emulationCheckbox,
 	)
 
-	csmaStatusBox := container.NewBorder(
-		widget.NewLabel("CSMA/CD Status"),
-		nil, nil, nil,
-		container.NewVBox(
-			ui.channelStateLabel,
-			ui.collisionStatsLabel,
-		),
-	)
+	csmaLogScroll := container.NewScroll(ui.eventLog)
+	csmaLogScroll.SetMinSize(fyne.NewSize(100, 160))
+	csmaLogContainer := container.NewVBox(csmaLogScroll)
+
+	csmaPanel := container.NewHSplit(csmaConfigBox, csmaLogContainer)
+	csmaPanel.SetOffset(0.3)
 
 	sentScroll := container.NewScroll(ui.sentMessages)
-	sentScroll.SetMinSize(fyne.NewSize(380, 150))
-
+	sentScroll.SetMinSize(fyne.NewSize(100, 120))
 	receivedScroll := container.NewScroll(ui.receivedMessages)
-	receivedScroll.SetMinSize(fyne.NewSize(380, 150))
+	receivedScroll.SetMinSize(fyne.NewSize(100, 120))
 
-	messagesGroup := container.NewGridWithColumns(2,
-		container.NewBorder(
-			widget.NewLabel("Sent Messages"),
-			nil, nil, nil,
-			sentScroll,
-		),
-		container.NewBorder(
-			widget.NewLabel("Received Messages"),
-			nil, nil, nil,
-			receivedScroll,
-		),
+	messagesGroup := container.NewHSplit(
+		container.NewVBox(widget.NewLabel("Sent Messages"), sentScroll),
+		container.NewVBox(widget.NewLabel("Received Messages"), receivedScroll),
 	)
+	messagesGroup.SetOffset(0.5)
 
-	packetInfoScroll := container.NewScroll(ui.sentPacketInfo)
-	packetInfoScroll.SetMinSize(fyne.NewSize(800, 150))
-
-	packetInfoGroup := container.NewBorder(
-		widget.NewLabel("Transmitted Frame Structure"),
-		nil, nil, nil,
-		packetInfoScroll,
-	)
-
-	return container.NewVBox(
-		container.NewHBox(
-			widget.NewLabel("Status:"),
-			ui.statusLabel,
-			ui.openButton,
-		),
-		settingsBox,
-		container.NewHBox(
-			csmaConfigBox,
-			csmaStatusBox,
-		),
+	messageInputPanel := container.NewVBox(
 		widget.NewLabel("Message to send:"),
 		ui.inputEntry,
 		sendButton,
-		messagesGroup,
-		packetInfoGroup,
 	)
+
+	topBlock := container.NewVBox(
+		settingsBox,
+		csmaPanel,
+		messageInputPanel,
+		messagesGroup,
+	)
+
+	packetInfoScroll := container.NewScroll(ui.sentPacketInfo)
+	packetInfoScroll.SetMinSize(fyne.NewSize(100, 160))
+	packetInfoContainer := container.NewVBox(packetInfoScroll)
+	packetInfoGroup := container.NewVBox(
+		widget.NewLabel("Transmitted Frame Structure"),
+		packetInfoContainer,
+	)
+
+	topBar := container.NewHBox(
+		widget.NewLabel("Status:"), ui.statusLabel, ui.openButton,
+	)
+
+	topArea := container.NewVBox(
+		topBar,
+		topBlock,
+	)
+
+	mainSplit := container.NewVSplit(topArea, packetInfoGroup)
+	mainSplit.SetOffset(0.8)
+
+	return mainSplit
 }
